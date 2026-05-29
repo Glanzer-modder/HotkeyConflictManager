@@ -1,0 +1,30 @@
+# Build output
+build/
+out/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.VC.db
+*.VC.VC.opendb
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# User-specific preset overrides  ← do NOT commit this
+CMakeUserPresets.json
+
+# Compiled plugin
+*.dll
+*.pdb
+*.lib
+*.exp
+
+# vcpkg installed packages (reproduced by CMake configure)
+vcpkg_installed/
+
+# Log files
+*.log

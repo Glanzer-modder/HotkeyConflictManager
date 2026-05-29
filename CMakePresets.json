@@ -1,0 +1,59 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": { "major": 3, "minor": 21, "patch": 0 },
+
+    "configurePresets": [
+        {
+            "name": "vs2022-windows",
+            "displayName": "Visual Studio 2022  (x64 Release)",
+            "description": "Uses local vcpkg toolchain and CommonLibSSE-NG source tree.",
+            "generator": "Visual Studio 17 2022",
+            "architecture": "x64",
+
+            "binaryDir": "${sourceDir}/build",
+
+            "cacheVariables": {
+
+                "CMAKE_BUILD_TYPE": "Release",
+
+                "CMAKE_TOOLCHAIN_FILE": {
+                    "type":  "FILEPATH",
+                    "value": "D:/Games/Utilities/VS Projects-Dependencies/vcpkg/scripts/buildsystems/vcpkg.cmake"
+                },
+
+                "VCPKG_TARGET_TRIPLET": "x64-windows-static-md",
+
+                "COMMONLIBSSE_PATH": {
+                    "type":  "PATH",
+                    "value": "D:/Games/Utilities/VS Projects-Dependencies/CommonLibSSE-NG"
+                }
+            },
+
+            "environment": {
+                "VCPKG_ROOT": "D:/Games/Utilities/VS Projects-Dependencies/vcpkg"
+            }
+        },
+
+        {
+            "name": "vs2022-windows-debug",
+            "displayName": "Visual Studio 2022  (x64 Debug)",
+            "inherits": "vs2022-windows",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
+        }
+    ],
+
+    "buildPresets": [
+        {
+            "name": "release",
+            "configurePreset": "vs2022-windows",
+            "configuration": "Release"
+        },
+        {
+            "name": "debug",
+            "configurePreset": "vs2022-windows-debug",
+            "configuration": "Debug"
+        }
+    ]
+}
