@@ -69,6 +69,56 @@ namespace
         return KeyRegistry::GetSingleton().GetGameKeyDisplayStatus(a_index);
     }
 
+    // ---- Unused Keys display -------------------------------------
+    std::int32_t GetUnusedKeyCount(RE::StaticFunctionTag*)
+    {
+        return KeyRegistry::GetSingleton().GetUnusedKeyCount();
+    }
+
+    std::int32_t GetUnusedKeyboardCount(RE::StaticFunctionTag*)
+    {
+        return KeyRegistry::GetSingleton().GetUnusedKeyboardCount();
+    }
+
+    std::int32_t GetUnusedMouseCount(RE::StaticFunctionTag*)
+    {
+        return KeyRegistry::GetSingleton().GetUnusedMouseCount();
+    }
+
+    std::int32_t GetUnusedControllerCount(RE::StaticFunctionTag*)
+    {
+        return KeyRegistry::GetSingleton().GetUnusedControllerCount();
+    }
+
+    std::string GetUnusedKeyDisplayLeft(RE::StaticFunctionTag*, std::int32_t a_index)
+    {
+        return KeyRegistry::GetSingleton().GetUnusedKeyDisplayLeft(a_index);
+    }
+
+    std::int32_t GetKeyDisplayKeyCode(RE::StaticFunctionTag*, std::int32_t a_index)
+    {
+        return KeyRegistry::GetSingleton().GetKeyDisplayKeyCode(a_index);
+    }
+
+    std::int32_t GetGameKeyDisplayKeyCode(RE::StaticFunctionTag*, std::int32_t a_index)
+    {
+        return KeyRegistry::GetSingleton().GetGameKeyDisplayKeyCode(a_index);
+    }
+
+    std::string GetKeyDisplayPlugin(RE::StaticFunctionTag*, std::int32_t a_index)
+    {
+        return KeyRegistry::GetSingleton().GetKeyDisplayPlugin(a_index);
+    }
+
+    void RemoveEntry(RE::StaticFunctionTag*,
+                     std::int32_t a_keyCode,
+                     std::string_view a_plugin)
+    {
+        if (a_keyCode <= 0) return;
+        KeyRegistry::GetSingleton().RemoveEntry(
+            static_cast<std::uint32_t>(a_keyCode), std::string(a_plugin));
+    }
+
     // ---- Configuration page --------------------------------------
     void SetPopupWarningsEnabled(RE::StaticFunctionTag*, bool a_enabled)
     {
@@ -107,22 +157,31 @@ bool PapyrusFunctions::RegisterFunctions(RE::BSScript::IVirtualMachine* a_vm)
 
     const auto s = Plugin::PapyrusScript.data();
 
-    a_vm->RegisterFunction("CheckKeyConflict",               s, CheckKeyConflict,               true);
-    a_vm->RegisterFunction("GetAssignedKeyCount",            s, GetAssignedKeyCount,            true);
-    a_vm->RegisterFunction("GetKeyDisplayLeft",              s, GetKeyDisplayLeft,              true);
-    a_vm->RegisterFunction("GetKeyDisplayRight",             s, GetKeyDisplayRight,             true);
-    a_vm->RegisterFunction("GetKeyDisplayStatus",            s, GetKeyDisplayStatus,            true);
-    a_vm->RegisterFunction("GetModConflictCount",            s, GetModConflictCount,            true);
-    a_vm->RegisterFunction("GetGameConflictCount",           s, GetGameConflictCount,           true);
-    a_vm->RegisterFunction("GetGameKeyCount",                s, GetGameKeyCount,                true);
-    a_vm->RegisterFunction("GetGameKeyDisplayLeft",          s, GetGameKeyDisplayLeft,          true);
-    a_vm->RegisterFunction("GetGameKeyDisplayRight",         s, GetGameKeyDisplayRight,         true);
-    a_vm->RegisterFunction("GetGameKeyDisplayStatus",        s, GetGameKeyDisplayStatus,        true);
-    a_vm->RegisterFunction("SetPopupWarningsEnabled",        s, SetPopupWarningsEnabled,        true);
-    a_vm->RegisterFunction("ClearOrphans",                   s, ClearOrphans,                   true);
-    a_vm->RegisterFunction("ClearRegistry",                  s, ClearRegistry,                  true);
-    a_vm->RegisterFunction("SetDebugModeEnabled",            s, SetDebugModeEnabled,            true);
-    a_vm->RegisterFunction("SetGameConflictWarningsEnabled", s, SetGameConflictWarningsEnabled, true);
+    a_vm->RegisterFunction("CheckKeyConflict",       s, CheckKeyConflict,        true);
+    a_vm->RegisterFunction("GetAssignedKeyCount",    s, GetAssignedKeyCount,     true);
+    a_vm->RegisterFunction("GetKeyDisplayLeft",      s, GetKeyDisplayLeft,       true);
+    a_vm->RegisterFunction("GetKeyDisplayRight",     s, GetKeyDisplayRight,      true);
+    a_vm->RegisterFunction("GetKeyDisplayStatus",    s, GetKeyDisplayStatus,     true);
+    a_vm->RegisterFunction("GetModConflictCount",     s, GetModConflictCount,     true);
+    a_vm->RegisterFunction("GetGameConflictCount",    s, GetGameConflictCount,    true);
+    a_vm->RegisterFunction("GetGameKeyCount",         s, GetGameKeyCount,         true);
+    a_vm->RegisterFunction("GetGameKeyDisplayLeft",   s, GetGameKeyDisplayLeft,   true);
+    a_vm->RegisterFunction("GetGameKeyDisplayRight",  s, GetGameKeyDisplayRight,  true);
+    a_vm->RegisterFunction("GetGameKeyDisplayStatus",  s, GetGameKeyDisplayStatus,  true);
+    a_vm->RegisterFunction("GetKeyDisplayKeyCode",     s, GetKeyDisplayKeyCode,     true);
+    a_vm->RegisterFunction("GetGameKeyDisplayKeyCode", s, GetGameKeyDisplayKeyCode, true);
+    a_vm->RegisterFunction("GetUnusedKeyCount",         s, GetUnusedKeyCount,         true);
+    a_vm->RegisterFunction("GetUnusedKeyboardCount",    s, GetUnusedKeyboardCount,    true);
+    a_vm->RegisterFunction("GetUnusedMouseCount",       s, GetUnusedMouseCount,       true);
+    a_vm->RegisterFunction("GetUnusedControllerCount",  s, GetUnusedControllerCount,  true);
+    a_vm->RegisterFunction("GetUnusedKeyDisplayLeft",   s, GetUnusedKeyDisplayLeft,   true);
+    a_vm->RegisterFunction("GetKeyDisplayPlugin",       s, GetKeyDisplayPlugin,       true);
+    a_vm->RegisterFunction("RemoveEntry",               s, RemoveEntry,               true);
+    a_vm->RegisterFunction("SetPopupWarningsEnabled",   s, SetPopupWarningsEnabled,   true);
+    a_vm->RegisterFunction("ClearOrphans",           s, ClearOrphans,            true);
+    a_vm->RegisterFunction("ClearRegistry",          s, ClearRegistry,           true);
+    a_vm->RegisterFunction("SetDebugModeEnabled",             s, SetDebugModeEnabled,            true);
+    a_vm->RegisterFunction("SetGameConflictWarningsEnabled",  s, SetGameConflictWarningsEnabled, true);
 
     logger::info("[HCM] Papyrus functions registered on script '{}'.",
                  Plugin::PapyrusScript);

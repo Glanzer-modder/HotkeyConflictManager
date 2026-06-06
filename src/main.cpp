@@ -83,10 +83,25 @@ namespace
             KeyRegistry::GetSingleton().Clear();
             KeyRegistry::GetSingleton().MarkLoadTime();
             KeyRegistry::GetSingleton().SnapshotControlMap();
-            // Reset flags to defaults for fresh game (no save to sync from)
-            KeyRegistry::GetSingleton().SetPopupWarningsEnabled(true);
-            KeyRegistry::GetSingleton().SetGameConflictWarningsEnabled(true);
-            KeyRegistry::GetSingleton().SetDebugModeEnabled(false);
+            // Reset flags to the values from the ESP (no save to sync from)
+            if (auto* glob = RE::TESForm::LookupByEditorID<RE::TESGlobal>("glz_HCM_warnings")) {
+                KeyRegistry::GetSingleton().SetPopupWarningsEnabled(glob->value != 0.0f);
+            }
+            else {
+                KeyRegistry::GetSingleton().SetPopupWarningsEnabled(true);
+            }
+            if (auto* glob = RE::TESForm::LookupByEditorID<RE::TESGlobal>("glz_HCM_game_warnings")) {
+                KeyRegistry::GetSingleton().SetGameConflictWarningsEnabled(glob->value != 0.0f);
+            }
+            else {
+                KeyRegistry::GetSingleton().SetGameConflictWarningsEnabled(true);
+            }
+            if (auto* glob = RE::TESForm::LookupByEditorID<RE::TESGlobal>("glz_HCM_debug")) {
+                KeyRegistry::GetSingleton().SetDebugModeEnabled(glob->value != 0.0f);
+            }
+            else {
+                KeyRegistry::GetSingleton().SetDebugModeEnabled(false);
+            }
             break;
 
         case SKSE::MessagingInterface::kPreLoadGame:

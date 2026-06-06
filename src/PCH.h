@@ -34,7 +34,7 @@ namespace Plugin
 {
     inline constexpr std::string_view NAME   { "HotkeyConflictManager" };
     inline constexpr std::string_view AUTHOR { "Glanzer" };
-    inline constexpr REL::Version     VERSION{ 1, 0, 0, 0 };
+    inline constexpr REL::Version     VERSION{ 1, 1, 0, 0 };
 
     inline constexpr std::string_view PapyrusScript{ "HCM_API" };
 

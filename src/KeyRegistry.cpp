@@ -67,25 +67,30 @@ void KeyRegistry::Register(std::uint32_t a_keyCode, FormID a_formID)
     }
     const std::string keyName   = GetKeyName(a_keyCode);
 
-    // Check vanilla game action conflict before acquiring my lock -
-    // reads only game engine data, not my maps.
+    // Check vanilla game action conflict before acquiring our lock -
+    // reads only game engine data, not our maps.
     // Skipped during startup to avoid noise from mass re-registration on load.
     const std::string vanillaConflict =
         isStartup ? std::string{} : CheckVanillaConflict(a_keyCode);
 
     std::unique_lock lock(_mutex);
+    auto* handler = RE::TESDataHandler::GetSingleton();
     _formToPlugin[a_formID] = pluginName;
 
-    // Check mod-mod conflict (first conflicting plugin only).
-    std::string modConflict;
+    // Collect all loaded plugins that share this key (excluding the registrant itself).
+    std::vector<std::string> modConflicts;
     if (auto it = _keyToPlugins.find(a_keyCode); it != _keyToPlugins.end()) {
         for (const auto& existing : it->second) {
-            if (existing != pluginName) {
-                modConflict = existing;
-                break;  // Report only first conflict per registration call.
-                        // Additional conflicts appear in the Assigned Keys MCM page.
-            }
+            if (existing != pluginName &&
+                (!handler || IsPluginLoaded(handler, existing)))
+                modConflicts.push_back(existing);
         }
+    }
+    // Build a single display string for use in logs and the popup.
+    std::string modConflict;
+    for (const auto& c : modConflicts) {
+        if (!modConflict.empty()) modConflict += ", ";
+        modConflict += c;
     }
 
     // Log and optionally show popup for any conflict found
@@ -107,7 +112,7 @@ void KeyRegistry::Register(std::uint32_t a_keyCode, FormID a_formID)
             // own conflict type independently.
             //
             // Note: the Journal Menu open event does not reliably fire in
-            // Skyrim SE (the menu persists in memory), so I use IsMenuOpen
+            // Skyrim SE (the menu persists in memory), so we use IsMenuOpen
             // directly.  This is safe because when a mod registers a key in
             // its MCM, the Journal Menu is still fully open and there is no
             // timing race.
@@ -127,9 +132,14 @@ void KeyRegistry::Register(std::uint32_t a_keyCode, FormID a_formID)
                     "  {}",
                     keyName, a_keyCode, pluginName);
 
-                if (wantMod)
-                    msg += fmt::format(
-                        "\n\nConflicts with mod:\n  {}", modConflict);
+                if (wantMod) {
+                    msg += modConflicts.size() == 1
+                        ? fmt::format("\n\nConflicts with mod:\n  {}", modConflict)
+                        : "\n\nConflicts with mods:";
+                    if (modConflicts.size() > 1)
+                        for (const auto& c : modConflicts)
+                            msg += fmt::format("\n  {}", c);
+                }
 
                 if (wantGame)
                     msg += fmt::format(
@@ -181,7 +191,7 @@ namespace
     };
 
     // Device list shared by all ControlMap-querying functions.
-    // Offset converts the device-local key index to my unified keyCode scheme.
+    // Offset converts the device-local key index to our unified keyCode scheme.
     struct DeviceInfo {
         RE::INPUT_DEVICE device;
         std::uint32_t    offset;
@@ -193,18 +203,57 @@ namespace
         { RE::INPUT_DEVICE::kGamepad,  266 },  // keyCodes 266+
     };
 
-    constexpr std::uint32_t kUnmapped = 0xFF;
     constexpr std::size_t k_gameActionCount = std::size(k_gameActions);
     constexpr std::size_t k_deviceCount     = std::size(k_devices);
 
+    // All known DX scan codes and their display names.
+    // Promoted to namespace scope so RebuildUnusedDisplayCache can
+    // iterate the full set.  GetKeyName reads from this table too.
+    // Adding a new entry here automatically picks it up on every
+    // page that displays key information.
+    static const std::unordered_map<std::uint32_t, std::string_view> k_names{
+        {0x01,"Esc"   },{0x02,"1"     },{0x03,"2"     },{0x04,"3"     },{0x05,"4"     },
+        {0x06,"5"     },{0x07,"6"     },{0x08,"7"     },{0x09,"8"     },{0x0A,"9"     },
+        {0x0B,"0"     },{0x0C,"-"     },{0x0D,"="     },{0x0E,"Bksp"  },{0x0F,"Tab"   },
+        {0x10,"Q"     },{0x11,"W"     },{0x12,"E"     },{0x13,"R"     },{0x14,"T"     },
+        {0x15,"Y"     },{0x16,"U"     },{0x17,"I"     },{0x18,"O"     },{0x19,"P"     },
+        {0x1A,"["     },{0x1B,"]"     },{0x1C,"Enter" },{0x1D,"LCtrl" },
+        {0x1E,"A"     },{0x1F,"S"     },{0x20,"D"     },{0x21,"F"     },{0x22,"G"     },
+        {0x23,"H"     },{0x24,"J"     },{0x25,"K"     },{0x26,"L"     },{0x27,";"     },
+        {0x28,"'"    },{0x29,"`"     },{0x2A,"LShft" },{0x2B,"\\"  },
+        {0x2C,"Z"     },{0x2D,"X"     },{0x2E,"C"     },{0x2F,"V"     },{0x30,"B"     },
+        {0x31,"N"     },{0x32,"M"     },{0x33,","     },{0x34,"."     },{0x35,"/"     },
+        {0x36,"RShft" },{0x37,"Num*"  },{0x38,"LAlt"  },{0x39,"Space" },
+        {0x3A,"Caps"  },{0x3B,"F1"    },{0x3C,"F2"    },{0x3D,"F3"    },{0x3E,"F4"    },
+        {0x3F,"F5"    },{0x40,"F6"    },{0x41,"F7"    },{0x42,"F8"    },{0x43,"F9"    },
+        {0x44,"F10"   },{0x45,"NumLk" },{0x46,"ScrlLk"},{0x47,"NUM7"  },{0x48,"NUM8"  },
+        {0x49,"NUM9"  },{0x4A,"NUM-"  },{0x4B,"NUM4"  },{0x4C,"NUM5"  },{0x4D,"NUM6"  },
+        {0x4E,"NUM+"  },{0x4F,"NUM1"  },{0x50,"NUM2"  },{0x51,"NUM3"  },{0x52,"NUM0"  },
+        {0x53,"NUM."  },{0x57,"F11"   },{0x58,"F12"   },{0xC5,"Pause" },
+        {0x9C,"NEnter"},{0x9D,"RCtrl" },{0xB5,"NUM/"  },{0xB8,"RAlt"  },
+        {0xC7,"Home"  },{0xC8,"Up"    },{0xC9,"PgUp"  },{0xCB,"Left"  },
+        {0xCD,"Right" },{0xCF,"End"   },{0xD0,"Down"  },{0xD1,"PgDn"  },
+        {0xD2,"Ins"   },{0xD3,"Del"   },
+        // Mouse
+        {256,"LMouse" },{257,"RMouse" },{258,"MMouse" },
+        {259,"Mouse4" },{260,"Mouse5" },{261,"Mouse6" },
+        {262,"Mouse7" },{263,"Mouse8" },
+        {264,"MWhlUp" },{265,"MWhlDn" },
+        // Controller
+        {266,"DPadUp" },{267,"DPadDwn"},{268,"DPadLft"},{269,"DPadRt" },
+        {270,"Start"  },{271,"Back"   },{272,"L3"     },{273,"R3"     },
+        {274,"LBtn"   },{275,"RBtn"   },{276,"ContrA" },{277,"ContrB" },
+        {278,"ContrX" },{279,"ContrY" },{280,"LThumb" },{281,"RThumb" },
+    };
+
     // Converts the bitmask value returned by ControlMap::GetMappedKey for
-    // the kGamepad device into my sequential keyCode scheme (266+).
+    // the kGamepad device into our sequential keyCode scheme (266+).
     //
     // Skyrim's ControlMap stores gamepad buttons as DirectInput bitmasks
     // (each button is a power-of-2 bit) rather than sequential indices.
-    // This table maps each known bitmask to my GetKeyName convention.
+    // This table maps each known bitmask to our GetKeyName convention.
     //
-    // Returns 0 if the bitmask is not recognized (caller should skip).
+    // Returns 0 if the bitmask is not recognised (caller should skip).
     static std::uint32_t GamepadBitmaskToKeyCode(std::uint32_t a_bitmask)
     {
         static const std::unordered_map<std::uint32_t, std::uint32_t> k_table{
@@ -245,7 +294,7 @@ std::string KeyRegistry::CheckVanillaConflict(std::uint32_t a_keyCode) const
     auto* ue = RE::UserEvents::GetSingleton();
     if (!cm || !ue) return {};
 
-    // Determine which input device owns this keyCode in my scheme:
+    // Determine which input device owns this keyCode in our scheme:
     //   0-255   -> keyboard (device index == keyCode)
     //   256-265 -> mouse    (device index == keyCode - 256)
     //   266+    -> gamepad  (GetMappedKey returns a bitmask, not a sequential index)
@@ -263,6 +312,9 @@ std::string KeyRegistry::CheckVanillaConflict(std::uint32_t a_keyCode) const
         // deviceKey unused for gamepad - bitmask conversion used instead
     }
 
+    // 0xFF is the sentinel returned by GetMappedKey when no key is bound.
+    constexpr std::uint32_t kUnmapped = 0xFF;
+
     for (auto memberPtr : k_gameActions) {
         const auto& actionName = ue->*memberPtr;
         if (actionName.empty()) continue;
@@ -271,9 +323,9 @@ std::string KeyRegistry::CheckVanillaConflict(std::uint32_t a_keyCode) const
 
         if (device == RE::INPUT_DEVICE::kGamepad) {
             // ControlMap returns a bitmask for gamepad buttons.
-            // Convert to my sequential scheme and compare directly.
-            const std::uint32_t myCode = GamepadBitmaskToKeyCode(mapped);
-            if (myCode != 0 && myCode == a_keyCode)
+            // Convert to our sequential scheme and compare directly.
+            const std::uint32_t ourCode = GamepadBitmaskToKeyCode(mapped);
+            if (ourCode != 0 && ourCode == a_keyCode)
                 return std::string(actionName.c_str());
         } else {
             if (mapped != kUnmapped && mapped == deviceKey)
@@ -393,7 +445,10 @@ void KeyRegistry::Clear()
     _gameDisplayEntries.clear();
     _modConflictCount  = 0;
     _gameConflictCount = 0;
-    _startupWindowExpiredLogged = false;
+    _unusedDisplayEntries.clear();
+    _unusedKeyboardCount   = 0;
+    _unusedMouseCount      = 0;
+    _unusedControllerCount = 0;
 }
 
 void KeyRegistry::ClearOrphans()
@@ -463,29 +518,15 @@ void KeyRegistry::LoadFromStream(SKSE::SerializationInterface* a_intfc)
 
     std::uint32_t count = 0;
     if (!a_intfc->ReadRecordData(&count, sizeof(count))) return;
-    if (count > 10000) {  // sanity cap: no mod could plausibly register >10000 keys
-        logger::error("[HCM] Cosave count {} is unreasonably large - aborting load.", count);
-        return;
-    }
-
 
     for (std::uint32_t i = 0; i < count; ++i) {
         std::uint32_t keyCode = 0;
         if (!a_intfc->ReadRecordData(&keyCode, sizeof(keyCode))) break;
         std::uint32_t pluginCount = 0;
         if (!a_intfc->ReadRecordData(&pluginCount, sizeof(pluginCount))) break;
-        if (pluginCount > 500) {  // one plugin registering >500 keys is implausible
-            logger::error("[HCM] Plugin count {} for key {} is unreasonably large - skipping.", pluginCount, keyCode);
-            break;
-        }
         for (std::uint32_t j = 0; j < pluginCount; ++j) {
             std::uint32_t len = 0;
-
             if (!a_intfc->ReadRecordData(&len, sizeof(len))) break;
-            if (len == 0 || len > 256) {  // plugin filenames are never >256 chars
-                logger::error("[HCM] Plugin name length {} is invalid - aborting load.", len);
-                break;
-            }
             std::string name(len, '\0');
             if (!a_intfc->ReadRecordData(name.data(), len)) break;
             _keyToPlugins[keyCode].insert(name);
@@ -506,11 +547,6 @@ bool KeyRegistry::IsPluginLoaded(RE::TESDataHandler* a_handler,
     // LookupLoadedModByName / LookupLoadedLightModByName use case-sensitive
     // comparison internally, which fails for light plugins and sometimes for
     // regular ones.  Iterate compiledFileCollection directly with _stricmp.
-
-    // TESFileCollection is at offset 0xD70 from TESDataHandler in SE/AE.
-    // LookupLoadedModByName / LookupLoadedLightModByName cannot be used here
-    // because they use case-sensitive comparison internally, which causes false
-    // negatives for some plugin names.  The 0 in RelocateMember is the VR offset.
     const auto& col =
         REL::RelocateMember<RE::TESFileCollection>(a_handler, 0xD70, 0);
 
@@ -553,7 +589,7 @@ void KeyRegistry::RebuildDisplayCache()
 
         // Check vanilla game action conflict.
         // CheckVanillaConflict reads only game engine data - safe to call
-        // while holding my write lock.
+        // while holding our write lock.
         const bool hasGameConflict = !CheckVanillaConflict(keyCode).empty();
 
         // Update per-keyCode counts (once per keyCode, not per plugin entry)
@@ -591,7 +627,9 @@ void KeyRegistry::RebuildDisplayCache()
                 fmt::format("[{:3}] {:6} : {}",
                     keyCode, GetKeyName(keyCode), plugin),
                 right,
-                status
+                status,
+                keyCode,
+                plugin
             });
         }
     }
@@ -610,6 +648,8 @@ void KeyRegistry::RebuildGameDisplayCache()
     auto* handler = RE::TESDataHandler::GetSingleton();
     if (!cm || !ue) return;
 
+    constexpr std::uint32_t kUnmapped = 0xFF;
+
     // Uses file-scope k_devices array defined in the anonymous namespace above.
 
     struct RawEntry {
@@ -626,7 +666,7 @@ void KeyRegistry::RebuildGameDisplayCache()
         for (const auto& [device, offset] : k_devices) {
             const auto mapped = cm->GetMappedKey(actionName, device);
 
-            // Determine my keyCode for this binding.
+            // Determine our keyCode for this binding.
             // Gamepad: GetMappedKey returns a bitmask - convert to sequential scheme.
             // Keyboard/mouse: add the device offset to the returned index.
             std::uint32_t fullKeyCode = 0;
@@ -670,7 +710,8 @@ void KeyRegistry::RebuildGameDisplayCache()
             fmt::format("[{:3}] {:6} : {}",
                 entry.keyCode, GetKeyName(entry.keyCode), entry.actionName),
             entry.hasModConflict ? "[MOD CONFLICT]" : "",
-            entry.hasModConflict ? 1 : 0
+            entry.hasModConflict ? 1 : 0,
+            entry.keyCode
         });
     }
 }
@@ -721,6 +762,55 @@ std::int32_t KeyRegistry::GetGameConflictCount() const
     return _gameConflictCount;
 }
 
+std::int32_t KeyRegistry::GetKeyDisplayKeyCode(std::int32_t a_index) const
+{
+    std::shared_lock lock(_mutex);
+    if (a_index < 0 ||
+        a_index >= static_cast<std::int32_t>(_displayEntries.size()))
+        return 0;
+    return static_cast<std::int32_t>(_displayEntries[a_index].keyCode);
+}
+
+std::string KeyRegistry::GetKeyDisplayPlugin(std::int32_t a_index) const
+{
+    std::shared_lock lock(_mutex);
+    if (a_index < 0 ||
+        a_index >= static_cast<std::int32_t>(_displayEntries.size()))
+        return {};
+    return _displayEntries[a_index].plugin;
+}
+
+void KeyRegistry::RemoveEntry(std::uint32_t a_keyCode, const std::string& a_plugin)
+{
+    std::unique_lock lock(_mutex);
+
+    // Remove from key→plugins map
+    if (auto it = _keyToPlugins.find(a_keyCode); it != _keyToPlugins.end()) {
+        it->second.erase(a_plugin);
+        if (it->second.empty())
+            _keyToPlugins.erase(it);
+    }
+
+    // Remove from plugin→keys map
+    if (auto it = _pluginToKeys.find(a_plugin); it != _pluginToKeys.end()) {
+        it->second.erase(a_keyCode);
+        if (it->second.empty())
+            _pluginToKeys.erase(it);
+    }
+
+    logger::info("[HCM] Registry entry removed by user: key {} ({}) from '{}'.",
+        a_keyCode, GetKeyName(a_keyCode), a_plugin);
+}
+
+std::int32_t KeyRegistry::GetGameKeyDisplayKeyCode(std::int32_t a_index) const
+{
+    std::shared_lock lock(_mutex);
+    if (a_index < 0 ||
+        a_index >= static_cast<std::int32_t>(_gameDisplayEntries.size()))
+        return 0;
+    return static_cast<std::int32_t>(_gameDisplayEntries[a_index].keyCode);
+}
+
 // ============================================================
 //  ControlMap snapshot and change detection
 // ============================================================
@@ -745,7 +835,7 @@ void KeyRegistry::SnapshotControlMap()
             std::uint32_t keyCode = 0;
             if (dev.device == RE::INPUT_DEVICE::kGamepad) {
                 keyCode = GamepadBitmaskToKeyCode(mapped);
-            } else if (mapped != kUnmapped) {
+            } else if (mapped != 0xFF) {
                 keyCode = mapped + dev.offset;
             }
 
@@ -784,7 +874,7 @@ std::vector<std::string> KeyRegistry::CheckControlMapChanges()
             std::uint32_t keyCode = 0;
             if (dev.device == RE::INPUT_DEVICE::kGamepad) {
                 keyCode = GamepadBitmaskToKeyCode(mapped);
-            } else if (mapped != kUnmapped) {
+            } else if (mapped != 0xFF) {
                 keyCode = mapped + dev.offset;
             }
 
@@ -807,32 +897,44 @@ std::vector<std::string> KeyRegistry::CheckControlMapChanges()
 
                 if (newCode == oldCode || newCode == 0) continue;
 
-                // Binding changed — check whether any loaded mod uses this key
+                // Binding changed — check whether any loaded mods use this key.
+                // Collect all conflicting mods so the popup names every one.
                 auto it = _keyToPlugins.find(newCode);
                 if (it == _keyToPlugins.end()) continue;
 
+                std::vector<std::string> bindingConflicts;
                 for (const auto& plugin : it->second) {
-                    if (!handler || IsPluginLoaded(handler, plugin)) {
-                        logger::info(
-                            "[HCM] ControlMap conflict: action '{}' remapped to "
-                            "key {} ({}) - conflicts with '{}'.",
-                            actionName.c_str(), newCode,
-                            GetKeyName(newCode), plugin);
-
-                        conflicts.push_back(fmt::format(
-                            "Game Key Conflict Detected!\n\n"
-                            "The game action '{}' was remapped to\n"
-                            "key '{}' (code {}),\n"
-                            "which is also registered by:\n  {}\n\n"
-                            "You may want to reassign one of these keys.",
-                            actionName.c_str(),
-                            GetKeyName(newCode),
-                            newCode,
-                            plugin));
-
-                        break;  // one message per changed binding
-                    }
+                    if (!handler || IsPluginLoaded(handler, plugin))
+                        bindingConflicts.push_back(plugin);
                 }
+                if (bindingConflicts.empty()) continue;
+
+                // Build mod list for message (singular or plural)
+                std::string modList;
+                for (const auto& m : bindingConflicts) {
+                    modList += fmt::format("\n  {}", m);
+                }
+                const std::string modHeader = bindingConflicts.size() == 1
+                    ? fmt::format("which is also registered by:\n  {}",
+                                  bindingConflicts[0])
+                    : "which is also registered by:" + modList;
+
+                logger::info(
+                    "[HCM] ControlMap conflict: action '{}' remapped to "
+                    "key {} ({}) - conflicts with '{}'.",
+                    actionName.c_str(), newCode,
+                    GetKeyName(newCode), modList);
+
+                conflicts.push_back(fmt::format(
+                    "Game Key Conflict Detected!\n\n"
+                    "The game action '{}' was remapped to\n"
+                    "key '{}' (code {}),\n"
+                    "{}\n\n"
+                    "You may want to reassign one of these keys.",
+                    actionName.c_str(),
+                    GetKeyName(newCode),
+                    newCode,
+                    modHeader));
             }
         }
     }
@@ -913,45 +1015,100 @@ std::string KeyRegistry::GetOwningPluginName(FormID a_formID) const
 }
 
 // ============================================================
+//  Unused Keys display cache
+//  Iterates all keys in k_names, skipping any that are
+//  registered by a loaded mod or bound to a game action.
+//  Results are in scan-code order: keyboard, mouse, controller.
+// ============================================================
+
+void KeyRegistry::RebuildUnusedDisplayCache()
+{
+    // Called under write lock from GetUnusedKeyCount().
+    _unusedDisplayEntries.clear();
+    _unusedKeyboardCount   = 0;
+    _unusedMouseCount      = 0;
+    _unusedControllerCount = 0;
+
+    auto* handler = RE::TESDataHandler::GetSingleton();
+
+    // Sort all known key codes for consistent display order
+    std::vector<std::uint32_t> sorted;
+    sorted.reserve(k_names.size());
+    for (const auto& [code, _] : k_names)
+        sorted.push_back(code);
+    std::sort(sorted.begin(), sorted.end());
+
+    for (std::uint32_t keyCode : sorted) {
+        // Skip if any loaded mod has registered this key
+        if (auto it = _keyToPlugins.find(keyCode); it != _keyToPlugins.end()) {
+            bool anyLoaded = false;
+            for (const auto& plugin : it->second) {
+                if (!handler || IsPluginLoaded(handler, plugin)) {
+                    anyLoaded = true;
+                    break;
+                }
+            }
+            if (anyLoaded) continue;
+        }
+
+        // Skip if bound to a game action.
+        // CheckVanillaConflict reads only game engine data - safe while holding lock.
+        if (!CheckVanillaConflict(keyCode).empty()) continue;
+
+        // Key is unassigned - add to display using shorter format
+        const auto nameIt = k_names.find(keyCode);
+        _unusedDisplayEntries.push_back(
+            fmt::format("[{}] {}", keyCode,
+                        nameIt != k_names.end() ? nameIt->second : "?"));
+
+        if      (keyCode < 256) ++_unusedKeyboardCount;
+        else if (keyCode < 266) ++_unusedMouseCount;
+        else                    ++_unusedControllerCount;
+    }
+}
+
+std::int32_t KeyRegistry::GetUnusedKeyCount()
+{
+    std::unique_lock lock(_mutex);
+    RebuildUnusedDisplayCache();
+    return static_cast<std::int32_t>(_unusedDisplayEntries.size());
+}
+
+std::int32_t KeyRegistry::GetUnusedKeyboardCount() const
+{
+    std::shared_lock lock(_mutex);
+    return _unusedKeyboardCount;
+}
+
+std::int32_t KeyRegistry::GetUnusedMouseCount() const
+{
+    std::shared_lock lock(_mutex);
+    return _unusedMouseCount;
+}
+
+std::int32_t KeyRegistry::GetUnusedControllerCount() const
+{
+    std::shared_lock lock(_mutex);
+    return _unusedControllerCount;
+}
+
+std::string KeyRegistry::GetUnusedKeyDisplayLeft(std::int32_t a_index) const
+{
+    std::shared_lock lock(_mutex);
+    if (a_index < 0 ||
+        a_index >= static_cast<std::int32_t>(_unusedDisplayEntries.size()))
+        return {};
+    return _unusedDisplayEntries[a_index];
+}
+
+// ============================================================
 //  GetKeyName
 // ============================================================
 
 std::string KeyRegistry::GetKeyName(std::uint32_t a_keyCode) const
 {
-    static const std::unordered_map<std::uint32_t, std::string_view> k_names{
-        {0x01,"Esc"   },{0x02,"1"     },{0x03,"2"     },{0x04,"3"     },{0x05,"4"     },
-        {0x06,"5"     },{0x07,"6"     },{0x08,"7"     },{0x09,"8"     },{0x0A,"9"     },
-        {0x0B,"0"     },{0x0C,"-"     },{0x0D,"="     },{0x0E,"Bksp"  },{0x0F,"Tab"   },
-        {0x10,"Q"     },{0x11,"W"     },{0x12,"E"     },{0x13,"R"     },{0x14,"T"     },
-        {0x15,"Y"     },{0x16,"U"     },{0x17,"I"     },{0x18,"O"     },{0x19,"P"     },
-        {0x1A,"["     },{0x1B,"]"     },{0x1C,"Enter" },{0x1D,"LCtrl" },
-        {0x1E,"A"     },{0x1F,"S"     },{0x20,"D"     },{0x21,"F"     },{0x22,"G"     },
-        {0x23,"H"     },{0x24,"J"     },{0x25,"K"     },{0x26,"L"     },{0x27,";"     },
-        {0x28,"'"     },{0x29,"`"     },{0x2A,"LShft" },{0x2B,"\\"    },
-        {0x2C,"Z"     },{0x2D,"X"     },{0x2E,"C"     },{0x2F,"V"     },{0x30,"B"     },
-        {0x31,"N"     },{0x32,"M"     },{0x33,","     },{0x34,"."     },{0x35,"/"     },
-        {0x36,"RShft" },{0x37,"Num*"  },{0x38,"LAlt"  },{0x39,"Space" },
-        {0x3A,"Caps"  },{0x3B,"F1"    },{0x3C,"F2"    },{0x3D,"F3"    },{0x3E,"F4"    },
-        {0x3F,"F5"    },{0x40,"F6"    },{0x41,"F7"    },{0x42,"F8"    },{0x43,"F9"    },
-        {0x44,"F10"   },{0x45,"NumLk" },{0x46,"ScrlLk"},{0x47,"NUM7"  },{0x48,"NUM8"  },
-        {0x49,"NUM9"  },{0x4A,"NUM-"  },{0x4B,"NUM4"  },{0x4C,"NUM5"  },{0x4D,"NUM6"  },
-        {0x4E,"NUM+"  },{0x4F,"NUM1"  },{0x50,"NUM2"  },{0x51,"NUM3"  },{0x52,"NUM0"  },
-        {0x53,"NUM."  },{0x57,"F11"   },{0x58,"F12"   },{0xC5,"Pause" },
-        {0x9C,"NEnter"},{0x9D,"RCtrl" },{0xB5,"NUM/"  },{0xB8,"RAlt"  },
-        {0xC7,"Home"  },{0xC8,"Up"    },{0xC9,"PgUp"  },{0xCB,"Left"  },
-        {0xCD,"Right" },{0xCF,"End"   },{0xD0,"Down"  },{0xD1,"PgDn"  },
-        {0xD2,"Ins"   },{0xD3,"Del"   },
-        {256,"LMouse" },{257,"RMouse" },{258,"MMouse" },
-        {259,"Mouse4" },{260,"Mouse5" },{261,"Mouse6" },
-        {262,"Mouse7" },{263,"Mouse8" },
-        {264,"MWhlUp" },{265,"MWhlDn" },
-        // Controller
-        {266,"DPadUp" },{267,"DPadDwn"},{268,"DPadLft"},{269,"DPadRt" },
-        {270,"Start"  },{271,"Back"   },{272,"L3"     },{273,"R3"     },
-        {274,"LBtn"   },{275,"RBtn"   },{276,"ContrA" },{277,"ContrB" },
-        {278,"ContrX" },{279,"ContrY" },{280,"LThumb" },{281,"RThumb" },
-    };
-
+    // k_names is defined in the anonymous namespace above;
+    // see that section to add new key codes.
     auto it = k_names.find(a_keyCode);
     return it != k_names.end()
         ? std::string(it->second)
